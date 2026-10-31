@@ -274,7 +274,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> Table<K, V, S> {
     ///
     /// This is similar to `scan`, but instead of an immutable lock guard, a mutable lock guard is
     /// returned.
-    fn scan_mut<F, Q: ?Sized>(&self, key: &Q, matches: F) -> RwLockWriteGuard<Bucket<K, V>>
+    fn scan_mut<F, Q: ?Sized>(&self, key: &Q, matches: F) -> RwLockWriteGuard<'_, Bucket<K, V>>
     where
         F: Fn(&Bucket<K, V>) -> bool,
         K: Borrow<Q>,
@@ -322,7 +322,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> Table<K, V, S> {
             // Check if it is a match.
             if {
                 let bucket = self.buckets[idx].get_mut();
-                matches(&bucket)
+                matches(bucket)
             } {
                 // Yup. Return.
                 return self.buckets[idx].get_mut();
@@ -377,7 +377,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> Table<K, V, S> {
     ///
     /// This means that the returned lock guard defines a valid, free bucket, where `key` can be
     /// inserted.
-    fn find_free(&self, key: &K) -> RwLockWriteGuard<Bucket<K, V>> {
+    fn find_free(&self, key: &K) -> RwLockWriteGuard<'_, Bucket<K, V>> {
         self.scan_mut(key, |x| x.is_free())
     }
 
@@ -741,7 +741,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> CHashMap<K, V, S> {
     /// This will lookup the entry of some key `key`, and acquire the read-only lock. This means
     /// that all other parties are blocked from _writing_ (not reading) this value while the guard
     /// is held.
-    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<ReadGuard<K, V, S>>
+    pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<ReadGuard<'_, K, V, S>>
     where
         K: Borrow<Q>,
         Q: Hash + PartialEq,
@@ -751,7 +751,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> CHashMap<K, V, S> {
             OwningHandle::new_with_fn(self.table.read(), |x| unsafe { &*x }.lookup(key, |l| l.read()))
         ).try_map(|x| x.value_ref()) {
             // The bucket contains data.
-            Some(ReadGuard { inner: inner })
+            Some(ReadGuard { inner })
         } else {
             // The bucket is empty/removed.
             None
@@ -763,7 +763,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> CHashMap<K, V, S> {
     /// This will lookup the entry of some key `key`, and acquire the writable lock. This means
     /// that all other parties are blocked from both reading and writing this value while the guard
     /// is held.
-    pub fn get_mut<Q: ?Sized>(&self, key: &Q) -> Option<WriteGuard<K, V, S>>
+    pub fn get_mut<Q: ?Sized>(&self, key: &Q) -> Option<WriteGuard<'_, K, V, S>>
     where
         K: Borrow<Q>,
         Q: Hash + PartialEq,
@@ -784,7 +784,7 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> CHashMap<K, V, S> {
                 }
             },
         ) {
-            Some(WriteGuard { inner: inner })
+            Some(WriteGuard { inner })
         } else {
             None
         }
@@ -972,7 +972,7 @@ where
         let lock = self.table.read();
 
         // Lookup the table, mutably.
-        let mut bucket = lock.lookup(&key, |l| l.write());
+        let mut bucket = lock.lookup(key, |l| l.write());
         // Remove the bucket.
         match &mut *bucket {
             // There was nothing to remove.
