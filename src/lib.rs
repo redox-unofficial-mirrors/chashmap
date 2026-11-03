@@ -340,11 +340,11 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> Table<K, V, S> {
     /// Replacing at this bucket is safe as the bucket will be in the same cluster of buckets as
     /// the first priority cluster.
     fn lookup<'a, Q, F, G>(&'a self, key: &Q, locker: F) -> G
-        where
-            K: Borrow<Q>,
-            Q: PartialEq + Hash + ?Sized,
-            F: Fn(&'a RwLock<Bucket<K, V>>) -> G,
-            G: ops::Deref<Target=Bucket<K, V>>
+    where
+        K: Borrow<Q>,
+        Q: PartialEq + Hash + ?Sized,
+        F: Fn(&'a RwLock<Bucket<K, V>>) -> G,
+        G: ops::Deref<Target = Bucket<K, V>>,
     {
         // Hash the key.
         let hash = self.hash(key);
@@ -489,7 +489,7 @@ impl<K, V, S> IntoIterator for Table<K, V, S> {
 ///
 /// This is an access type dereferencing to the inner value of the entry. It will handle unlocking
 /// on drop.
-pub struct ReadGuard<'a, K: 'a, V: 'a, S> {
+pub struct ReadGuard<'a, K: 'a, V: 'a, S = RandomState> {
     /// The inner hecking long type.
     inner: OwningRef<
         OwningHandle<RwLockReadGuard<'a, Table<K, V, S>>, RwLockReadGuard<'a, Bucket<K, V>>>,
@@ -522,7 +522,7 @@ impl<'a, K: fmt::Debug, V: fmt::Debug, S> fmt::Debug for ReadGuard<'a, K, V, S> 
 ///
 /// This is an access type dereferencing to the inner value of the entry. It will handle unlocking
 /// on drop.
-pub struct WriteGuard<'a, K: 'a, V: 'a, S> {
+pub struct WriteGuard<'a, K: 'a, V: 'a, S = RandomState> {
     /// The inner hecking long type.
     inner: OwningHandle<
         OwningHandle<RwLockReadGuard<'a, Table<K, V, S>>, RwLockWriteGuard<'a, Bucket<K, V>>>,
@@ -747,9 +747,11 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> CHashMap<K, V, S> {
         Q: Hash + PartialEq,
     {
         // Acquire the read lock and lookup in the table.
-        if let Ok(inner) = OwningRef::new(
-            OwningHandle::new_with_fn(self.table.read(), |x| unsafe { &*x }.lookup(key, |l| l.read()))
-        ).try_map(|x| x.value_ref()) {
+        if let Ok(inner) = OwningRef::new(OwningHandle::new_with_fn(self.table.read(), |x| {
+            unsafe { &*x }.lookup(key, |l| l.read())
+        }))
+        .try_map(|x| x.value_ref())
+        {
             // The bucket contains data.
             Some(ReadGuard { inner })
         } else {
@@ -769,9 +771,10 @@ impl<K: PartialEq + Hash, V, S: BuildHasher> CHashMap<K, V, S> {
         Q: Hash + PartialEq,
     {
         // Acquire the write lock and lookup in the table.
-        if let Ok(inner) = OwningHandle::try_new(OwningHandle::new_with_fn(
-            self.table.read(),
-            |x| unsafe { &*x }.lookup(key, |l| l.write())),
+        if let Ok(inner) = OwningHandle::try_new(
+            OwningHandle::new_with_fn(self.table.read(), |x| {
+                unsafe { &*x }.lookup(key, |l| l.write())
+            }),
             |x| {
                 if let &mut Bucket::Contains(_, ref mut val) =
                     unsafe { &mut *(x as *mut Bucket<K, V>) }
